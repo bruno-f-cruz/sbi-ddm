@@ -1,0 +1,15 @@
+[project]
+name = "sbi-ddm"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "jax[cuda13]; sys_platform == 'linux'",
+    "jax; sys_platform != 'linux'",
+    "tensorflow-probability>=0.25.0",
+    "sbijax>=0.3.4",
+    "numpyro>=0.20.0",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.8",
+]
