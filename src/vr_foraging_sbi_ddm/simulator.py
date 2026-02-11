@@ -1,4 +1,5 @@
-from typing import Callable, Any
+from typing import Callable
+
 import jax
 import jax.numpy as jnp
 from jax import Array, jit, random, vmap
@@ -122,7 +123,9 @@ class JaxPatchForagingDdm:
             evidence, num_rewards, site_idx, global_time, patch_time, window_data = state
             return site_idx < self.max_sites_per_window
 
-        def body_fn(state: tuple[Array, Array, Array, Array, Array, Array]) -> tuple[Array, Array, Array, Array, Array, Array]:
+        def body_fn(
+            state: tuple[Array, Array, Array, Array, Array, Array],
+        ) -> tuple[Array, Array, Array, Array, Array, Array]:
             evidence, num_rewards, site_idx, global_time, patch_time, window_data = state
 
             # Get pre-generated random values for this site
@@ -183,7 +186,7 @@ class JaxPatchForagingDdm:
         final_state = jax.lax.while_loop(cond_fn, body_fn, init_state)
         _, _, _, _, _, double_window_data = final_state
 
-        window_data = double_window_data[(int(self.max_sites_per_window / 2)):, :]
+        window_data = double_window_data[(int(self.max_sites_per_window / 2)) :, :]
 
         summary_stats: jax.Array
         match self.n_feat:
@@ -191,6 +194,7 @@ class JaxPatchForagingDdm:
                 summary_stats = prepare_raw_data(window_data)
             case 37:
                 from vr_foraging_sbi_ddm.feature_engineering import compute_summary_stats
+
                 summary_stats = compute_summary_stats(window_data)
             case _:
                 raise ValueError(f"Unsupported n_feat value: {self.n_feat}. Supported values: 300, 37")
@@ -252,7 +256,11 @@ class JaxPatchForagingDdm:
 def create_prior(prior_low: ArrayLike, prior_high: ArrayLike) -> Callable[[], tfd.JointDistributionNamed]:
     def prior_fn():
         return tfd.JointDistributionNamed(
-            {"theta": tfd.Independent(tfd.Uniform(low=jnp.array(prior_low), high=jnp.array(prior_high)), reinterpreted_batch_ndims=1)},
+            {
+                "theta": tfd.Independent(
+                    tfd.Uniform(low=jnp.array(prior_low), high=jnp.array(prior_high)), reinterpreted_batch_ndims=1
+                )
+            },
             batch_ndims=0,
         )
 
@@ -260,6 +268,7 @@ def create_prior(prior_low: ArrayLike, prior_high: ArrayLike) -> Callable[[], tf
 
 
 # ===== Tests =====
+
 
 def main():
     # Simple test of simulator
@@ -277,6 +286,6 @@ def main():
     print("\nSummary Stats:")
     print(summary_stats[:7])  # Just show first 7 basic stats
 
+
 if __name__ == "__main__":
     main()
-

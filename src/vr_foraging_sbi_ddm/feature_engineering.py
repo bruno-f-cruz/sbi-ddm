@@ -1,7 +1,5 @@
-import os
 
 # Force CPU backend on Apple Silicon to avoid Metal issues
-os.environ["JAX_PLATFORMS"] = "cpu"
 
 
 import jax.numpy as jnp

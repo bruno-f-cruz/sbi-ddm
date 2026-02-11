@@ -7,11 +7,9 @@ Purpose: Plotting, diagnostics, and comparison functions for SNLE inference usin
 import os
 
 # Force CPU backend on Apple Silicon to avoid Metal issues
-os.environ["JAX_PLATFORMS"] = "cpu"
-
-import os
 import pickle
 from datetime import datetime
+
 import arviz as az
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -19,6 +17,7 @@ import numpy as np
 import xarray as xr
 from jax import random
 from scipy.stats import gaussian_kde
+
 from ..models import Config
 
 
@@ -513,9 +512,10 @@ def load_model(model_path):
         - prior_fn : callable (Prior distribution function)
         - model_dir : Path (Model directory path)
     """
-    from ..simulator import JaxPatchForagingDdm, create_prior
     from sbijax import NLE
     from sbijax.nn import make_maf
+
+    from ..simulator import JaxPatchForagingDdm, create_prior
 
     # Handle both file and directory paths
     if model_path.is_dir():

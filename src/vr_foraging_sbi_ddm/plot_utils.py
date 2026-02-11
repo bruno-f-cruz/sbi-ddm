@@ -1,6 +1,7 @@
+from contextlib import contextmanager
 
 import matplotlib.pyplot as plt
-from contextlib import contextmanager
+
 
 @contextmanager
 def a_lot_of_style(
@@ -42,7 +43,7 @@ def a_lot_of_style(
             "figure.facecolor": "white",
             "axes.facecolor": "white",
             "text.usetex": False,
-            "font.family": "sans-serif"
+            "font.family": "sans-serif",
         }
     )
 
