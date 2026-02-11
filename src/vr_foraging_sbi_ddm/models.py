@@ -99,9 +99,3 @@ class Config(pydantic_settings.BaseSettings):
 
     # Random seed
     seed: int = Field(default=0, description="Random seed for reproducibility")
-
-
-CONFIG = Config()
-
-print("Configuration loaded")
-print(f"Model directory: {CONFIG.filename}")
