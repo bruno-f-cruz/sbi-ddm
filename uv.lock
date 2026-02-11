@@ -3477,6 +3477,7 @@ name = "vr-foraging-sbi-ddm"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "ipython" },
     { name = "jax" },
     { name = "jax", extra = ["cuda13"], marker = "sys_platform == 'linux'" },
     { name = "jupyter" },
@@ -3495,6 +3496,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "ipython", specifier = ">=9.10.0" },
     { name = "jax", marker = "sys_platform != 'linux'" },
     { name = "jax", extras = ["cuda13"], marker = "sys_platform == 'linux'" },
     { name = "jupyter", specifier = ">=1.1.1" },

@@ -230,8 +230,6 @@ class JaxPatchForagingDdm:
         """
         # Extract theta array
         if isinstance(theta, dict):
-            raise ValueError("Expected theta to be an array, but got a dict. Please pass the parameter array directly.")
-            # TODO
             theta_array = theta["theta"]
         else:
             theta_array = theta

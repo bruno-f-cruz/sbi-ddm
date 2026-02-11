@@ -100,7 +100,7 @@ def train_snle(
     # Generate one sample to get dimensions
     rng_key, test_key = random.split(rng_key)
     test_theta = prior_fn().sample(seed=test_key)
-    test_x = simulator.simulator_fn(seed=test_key, theta=test_theta)
+    test_x = simulator.simulator_fn(seed=test_key, theta=test_theta["theta"])
 
     n_dim_data = test_x.shape[-1]
 

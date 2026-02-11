@@ -99,3 +99,21 @@ class Config(pydantic_settings.BaseSettings):
 
     # Random seed
     seed: int = Field(default=0, description="Random seed for reproducibility")
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[pydantic_settings.BaseSettings],
+        init_settings: pydantic_settings.PydanticBaseSettingsSource,
+        env_settings: pydantic_settings.PydanticBaseSettingsSource,
+        dotenv_settings: pydantic_settings.PydanticBaseSettingsSource,
+        file_secret_settings: pydantic_settings.PydanticBaseSettingsSource,
+    ) -> tuple[pydantic_settings.PydanticBaseSettingsSource, ...]:
+        """Specify order of settings sources (yaml file, env vars, etc)"""
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            file_secret_settings,
+            pydantic_settings.YamlConfigSettingsSource(settings_cls),
+        )
