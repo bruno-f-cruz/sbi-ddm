@@ -1,5 +1,9 @@
+[build-system]
+requires = ["uv_build>=0.8.22"]
+build-backend = "uv_build"
+
 [project]
-name = "sbi-ddm"
+name = "vr_foraging_sbi_ddm"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -13,3 +17,29 @@ dependencies = [
     "jupyter>=1.1.1",
     "matplotlib>=3.10.8",
 ]
+
+
+[dependency-groups]
+
+dev = [
+    "ruff",
+    "codespell",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = 'py311'
+
+[tool.ruff.lint]
+extend-select = ['Q', 'RUF100', 'C90', 'I']
+extend-ignore = []
+mccabe = { max-complexity = 14 }
+pydocstyle = { convention = 'google' }
+
+[tool.codespell]
+skip = '.git,*.pdf,*.svg,./bonsai,*.bonsai,./docs/_build,uv.lock,*Generated.cs'
+ignore-words-list = 'nd'
+
+[tool.uv]
+default-groups = ['dev']
+required-version = '>=0.8.4'
