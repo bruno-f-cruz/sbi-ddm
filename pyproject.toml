@@ -12,10 +12,11 @@ dependencies = [
     "jax[cuda13]; sys_platform == 'linux'",
     "jax; sys_platform != 'linux'",
     "tensorflow-probability>=0.25.0",
-    "sbijax>=0.3.4",
+    "sbijax @ git+https://github.com/dirmeier/sbijax@0bc94d2", # lauradriscoll fixed a jax import bug but no release yet, so we point to the commit directly
     "numpyro>=0.20.0",
     "jupyter>=1.1.1",
     "matplotlib>=3.10.8",
+    "pydantic-settings>=2.12.0",
 ]
 
 
