@@ -8,30 +8,38 @@ This module provides tools for validating SNLE models through:
 """
 
 # Disable LaTeX rendering in matplotlib
+import time
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 from jax import random
 from scipy.stats import kstest, norm
+from typing import Literal
 
+import jax
+import jax.numpy as jnp
+import optax
+from jax import random
+from sbijax import NLE
+from sbijax.nn import make_maf, make_spf
+from .simulator import JaxPatchForagingDdm
 
-def run_sbc_evaluation(
-    snle,
-    snle_params,
-    y_mean,
-    y_std,
-    simulator,
+def compute_sbc_metrics(
+    snle: NLE,
+    snle_params: dict,
+    y_mean: jax.Array,
+    y_std: jax.Array,
+    simulator: JaxPatchForagingDdm,
     prior_fn,
     infer_fn,
     n_tests=100,
     num_samples=500,
     num_warmup=100,
     num_chains=2,
-    bins=10,
-    save_path=None,
+    seed=42,
 ):
     """
-    Run Simulation-Based Calibration to validate posterior calibration.
+    Compute Simulation-Based Calibration metrics.
 
     SBC checks if the posterior correctly captures true parameters by:
     1. Sampling true parameters from the prior
@@ -62,17 +70,18 @@ def run_sbc_evaluation(
         Number of MCMC warmup steps (default: 100)
     num_chains : int, optional
         Number of MCMC chains (default: 2)
-    bins : int, optional
-        Number of bins for rank histograms (default: 10)
-    save_path : str, optional
-        Path to save figure (default: None, shows instead)
+    seed : int, optional
+        Random seed (default: 42)
 
     Returns
     -------
-    ranks : dict
-        Rank statistics for each parameter
-    z_scores : dict
-        Z-score statistics for each parameter
+    results : dict
+        Dictionary containing:
+        - ranks: Rank statistics for each parameter
+        - z_scores: Z-score statistics for each parameter
+        - param_names: List of parameter names
+        - n_tests: Number of tests run
+        - num_samples: Number of samples used
 
     Notes
     -----
@@ -80,17 +89,26 @@ def run_sbc_evaluation(
     - Uniform rank distributions (KS test p > 0.05)
     - Z-scores centered at 0 with std ~1
     """
-    rng_key = random.PRNGKey(42)
+    rng_key = random.PRNGKey(seed)
     param_names = ["drift_rate", "reward_bump", "failure_bump", "noise_std"]
 
     ranks = {param: [] for param in param_names}
     z_scores = {param: [] for param in param_names}
 
     print(f"Running SBC with {n_tests} tests...")
+    print(f"MCMC settings: {num_samples} samples, {num_warmup} warmup, {num_chains} chains")
+    print()
 
+    test_times = []
     for test in range(n_tests):
-        if test % 20 == 0:
-            print(f"  {test}/{n_tests}...")
+        test_start = time.time()
+        
+        # Print progress for all tests initially, then every 10
+        if test < 5 or test % 10 == 0:
+            print(f"  Test {test + 1}/{n_tests}...", end="", flush=True)
+            show_timing = True
+        else:
+            show_timing = False
 
         rng_key, subkey1, subkey2 = random.split(rng_key, 3)
 
@@ -126,9 +144,51 @@ def run_sbc_evaluation(
             post_std = posterior_samples[:, i].std()
             z = (post_mean - true_theta[i]) / post_std
             z_scores[param].append(float(z))
+        
+        # Timing and ETA
+        test_time = time.time() - test_start
+        test_times.append(test_time)
+        
+        if show_timing:
+            avg_time = sum(test_times) / len(test_times)
+            remaining = (n_tests - test - 1) * avg_time
+            print(f" completed in {test_time:.1f}s (avg: {avg_time:.1f}s, ETA: {remaining/60:.1f}min)")
 
-    # === PLOT SBC RESULTS ===
-    fig, axes = plt.subplots(2, 4, figsize=(16, 8))
+    return {
+        "ranks": ranks,
+        "z_scores": z_scores,
+        "param_names": param_names,
+        "n_tests": n_tests,
+        "num_samples": num_samples,
+    }
+
+
+def plot_sbc_diagnostics(sbc_results, bins=10, save_path=None, figsize=(16, 8)):
+    """
+    Plot SBC rank histograms, z-score distributions, and print summary statistics.
+
+    This function combines visualization and statistical summary for complete
+    SBC diagnostics in a single call.
+
+    Parameters
+    ----------
+    sbc_results : dict
+        Results from compute_sbc_metrics
+    bins : int, optional
+        Number of bins for histograms (default: 10)
+    save_path : str, optional
+        Path to save figure (default: None, shows instead)
+    figsize : tuple, optional
+        Figure size (default: (16, 8))
+    """
+    ranks = sbc_results["ranks"]
+    z_scores = sbc_results["z_scores"]
+    param_names = sbc_results["param_names"]
+    n_tests = sbc_results["n_tests"]
+    num_samples = sbc_results["num_samples"]
+
+    # === PLOT ===
+    fig, axes = plt.subplots(2, 4, figsize=figsize)
 
     for i, param in enumerate(param_names):
         # Rank histogram (top row)
@@ -185,15 +245,13 @@ def run_sbc_evaluation(
         if abs(z_mean) < 0.3 and 0.8 < z_std < 1.2 and ks_pval > 0.05:
             print("  ✅ Well-calibrated!")
 
-    return ranks, z_scores
-
 
 def validate_parameter_recovery(
-    snle,
-    snle_params,
-    y_mean,
-    y_std,
-    simulator,
+    snle: NLE,
+    snle_params: dict,
+    y_mean: jax.Array,
+    y_std: jax.Array,
+    simulator: JaxPatchForagingDdm,
     prior_fn,
     infer_fn,
     n_tests=10,
@@ -248,9 +306,13 @@ def validate_parameter_recovery(
     posterior_stds = []
 
     print(f"Running parameter recovery validation with {n_tests} tests...")
+    print(f"MCMC settings: {num_samples} samples, {num_warmup} warmup, {num_chains} chains")
+    print()
 
+    test_times = []
     for test in range(n_tests):
-        print(f"  Test {test + 1}/{n_tests}")
+        test_start = time.time()
+        print(f"  Test {test + 1}/{n_tests}...", end="", flush=True)
 
         # Sample true parameters
         rng_key, subkey1 = random.split(rng_key)
@@ -279,6 +341,13 @@ def validate_parameter_recovery(
         true_params.append(true_theta)
         posterior_means.append(posterior_samples.mean(axis=0))
         posterior_stds.append(posterior_samples.std(axis=0))
+        
+        # Timing and ETA
+        test_time = time.time() - test_start
+        test_times.append(test_time)
+        avg_time = sum(test_times) / len(test_times)
+        remaining = (n_tests - test - 1) * avg_time
+        print(f" completed in {test_time:.1f}s (avg: {avg_time:.1f}s, ETA: {remaining/60:.1f}min)")
 
     true_params = jnp.array(true_params)
     posterior_means = jnp.array(posterior_means)
@@ -322,7 +391,7 @@ def validate_parameter_recovery(
     }
 
 
-def plot_recovery_scatter(recovery_results, figsize=(12, 3)):
+def plot_recovery_scatter(recovery_results, save_path=None, figsize=(12, 3)):
     """
     Plot true vs recovered parameters as scatter plots.
 
@@ -330,6 +399,8 @@ def plot_recovery_scatter(recovery_results, figsize=(12, 3)):
     ----------
     recovery_results : dict
         Results from validate_parameter_recovery
+    save_path : str, optional
+        Path to save figure (default: None, shows instead)
     figsize : tuple, optional
         Figure size (default: (12, 3))
     """
@@ -356,4 +427,9 @@ def plot_recovery_scatter(recovery_results, figsize=(12, 3)):
         ax.grid(alpha=0.3)
 
     plt.tight_layout()
-    plt.show()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"Figure saved to {save_path}")
+    else:
+        plt.show()

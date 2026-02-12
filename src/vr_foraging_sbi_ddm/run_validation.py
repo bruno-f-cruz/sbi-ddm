@@ -13,7 +13,12 @@ import matplotlib.pyplot as plt
 
 from .snle.snle_inference_jax import infer_parameters_snle
 from .snle.snle_utils_jax import load_model
-from .validation import plot_recovery_scatter, run_sbc_evaluation, validate_parameter_recovery
+from .validation import (
+    compute_sbc_metrics,
+    plot_recovery_scatter,
+    plot_sbc_diagnostics,
+    validate_parameter_recovery,
+)
 
 
 def run_validation_suite(model_path, n_sbc_tests=100, n_recovery_tests=10, seed=42):
@@ -62,7 +67,8 @@ def run_validation_suite(model_path, n_sbc_tests=100, n_recovery_tests=10, seed=
 
     sbc_save_path = validation_dir / "sbc_results.png"
 
-    ranks, z_scores = run_sbc_evaluation(
+    # Compute SBC metrics
+    sbc_results = compute_sbc_metrics(
         snle=snle,
         snle_params=snle_params,
         y_mean=y_mean,
@@ -74,12 +80,14 @@ def run_validation_suite(model_path, n_sbc_tests=100, n_recovery_tests=10, seed=
         num_samples=500,
         num_warmup=100,
         num_chains=2,
-        bins=10,
-        save_path=sbc_save_path,
+        seed=seed,
     )
 
+    # Plot and print diagnostics
+    plot_sbc_diagnostics(sbc_results, bins=10, save_path=sbc_save_path)
+
     # Save SBC results as pickle
-    sbc_results = {"ranks": ranks, "z_scores": z_scores, "n_tests": n_sbc_tests, "config": config}
+    sbc_results["config"] = config
 
     with open(validation_dir / "sbc_results.pkl", "wb") as f:
         pickle.dump(sbc_results, f)
