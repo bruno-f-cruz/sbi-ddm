@@ -14,6 +14,8 @@ Key differences from PyTorch version:
 
 # Force CPU backend on Apple Silicon to avoid Metal issues
 
+from typing import Literal
+
 import jax.numpy as jnp
 import optax
 from jax import random
@@ -172,7 +174,18 @@ def train_snle(
 
 
 def infer_parameters_snle(
-    snle, snle_params, observed_stats, y_mean, y_std, num_samples=1000, num_warmup=200, num_chains=4, rng_key=None
+    snle,
+    snle_params,
+    observed_stats,
+    y_mean,
+    y_std,
+    num_samples: int = 1000,
+    num_warmup: int = 200,
+    num_chains: int = 4,
+    sampler: Literal["nuts", "slice", "mala"] = "nuts",
+    n_thin: int = 5,
+    rng_key=None,
+    verbose: bool = True,
 ):
     """
     Infer parameters from observed summary statistics using trained SNLE.
@@ -182,14 +195,21 @@ def infer_parameters_snle(
         snle_params: Trained network parameters
         observed_stats: Observed summary statistics (unnormalized)
         y_mean, y_std: Normalization statistics from training
-        num_samples: Number of posterior samples per chain
-        num_warmup: Number of warmup samples
-        num_chains: Number of MCMC chains
+        num_samples: Number of posterior samples per chain (default: 1000)
+        num_warmup: Number of warmup samples (default: 200)
+        num_chains: Number of MCMC chains (default: 4)
+        sampler: MCMC sampler to use (default: 'nuts').
+            - 'nuts': Best mixing per sample, expensive per step (gradient + tree building)
+            - 'slice': No gradients, cheaper per step, needs more steps. Use with n_thin.
+            - 'mala': Single leapfrog step, faster per step than NUTS but worse mixing.
+        n_thin: Thinning factor for slice sampler (default: 5). Ignored by other samplers.
         rng_key: JAX random key
+        verbose: If True, print progress messages (default: True).
+            Set to False for batch processing / SBC loops.
 
     Returns:
         posterior_samples: Array of shape (num_chains * num_samples, n_params)
-        rng_key: Updated random key
+        diagnostics: MCMC diagnostics from the sampler
     """
 
     if rng_key is None:
@@ -200,13 +220,16 @@ def infer_parameters_snle(
     if observed_stats.ndim > 1:
         observed_stats = observed_stats.flatten()
 
-    print("\nNormalizing observed statistics...")
-
     # NORMALIZE using training statistics
     observed_stats_normalized = (observed_stats - y_mean) / y_std
 
-    print("\nRunning MCMC inference...")
+    if verbose:
+        print("\nRunning MCMC inference...")
     rng_key, sample_key = random.split(rng_key)
+
+    sampler_kwargs = {"sampler": sampler}
+    if sampler == "slice":
+        sampler_kwargs["n_thin"] = n_thin
 
     inference_results, diagnostics = snle.sample_posterior(
         sample_key,
@@ -215,22 +238,23 @@ def infer_parameters_snle(
         n_samples=num_samples,
         n_warmup=num_warmup,
         n_chains=num_chains,
+        **sampler_kwargs,
     )
 
     # Robust extraction
     posterior_ds = extract_samples(inference_results)
-    print(f"Posterior dataset variables: {list(posterior_ds.data_vars)}")
 
     # Always reshape to (chain, draw, n_params)
     theta = posterior_ds["theta"].values
     theta = theta.reshape(theta.shape[0], theta.shape[1], -1)
-    print(f"Posterior theta shape (chain, draw, n_params): {theta.shape}")
 
     # Flatten to (chain*draw, n_params)
     posterior_samples = theta.reshape(-1, theta.shape[-1])
-    print(f"Posterior samples shape (flattened): {posterior_samples.shape}")
 
-    return posterior_samples, rng_key
+    if verbose:
+        print(f"Posterior samples shape: {posterior_samples.shape}")
+
+    return posterior_samples, diagnostics
 
 
 # ===== Test =====
@@ -268,7 +292,7 @@ if __name__ == "__main__":
     # --- Run inference ---
     print("\n3. Testing inference...")
     rng_key, subkey = random.split(rng_key)
-    posterior_samples, rng_key = infer_parameters_snle(
+    posterior_samples, diagnostics = infer_parameters_snle(
         snle,
         snle_params,
         observed_stats,

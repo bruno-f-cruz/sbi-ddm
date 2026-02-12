@@ -112,6 +112,7 @@ def run_sbc_evaluation(
             num_warmup=num_warmup,
             num_chains=num_chains,
             rng_key=subkey3,
+            verbose=False,
         )
 
         # 4. Compute ranks and z-scores
@@ -271,6 +272,7 @@ def validate_parameter_recovery(
             num_warmup=num_warmup,
             num_chains=num_chains,
             rng_key=subkey3,
+            verbose=False,
         )
 
         # Store results
