@@ -84,7 +84,6 @@ prior_fn = create_prior()
 snle, snle_params, losses, rng_key, y_mean, y_std = train_snle(
     simulator,
     prior_fn,
-    mode='multi',
     n_simulations=2_000_000,
     n_iter=1000,
     batch_size=256,
