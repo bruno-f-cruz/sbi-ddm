@@ -27,11 +27,13 @@ class Config(pydantic_settings.BaseSettings):
         default=["Methyl_Butyrate", "Alpha_pinene"], description="Types of odors used in experiments"
     )
 
-    @computed_field
-    @property
-    def odor_display_names(self) -> dict[str, str]:
-        """Display names for odor types (converts snake_case to Title Case with spaces)."""
-        return {odor: odor.replace("_", " ").title() for odor in self.odor_types}
+    odor_display_names: dict[str, str] = Field(
+        default={
+            "Methyl_Butyrate": "Methyl Butyrate",
+            "Alpha_pinene": "Alpha-pinene",
+        },
+        description="Mapping of odor types to display names for plots",
+    )
 
     # Task parameters
     interval_min: float = Field(default=20.0, gt=0.0, description="Minimum interval value")

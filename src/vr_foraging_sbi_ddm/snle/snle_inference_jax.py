@@ -16,6 +16,7 @@ Key differences from PyTorch version:
 
 from typing import Literal
 
+import jax
 import jax.numpy as jnp
 import optax
 from jax import random
@@ -174,17 +175,17 @@ def train_snle(
 
 
 def infer_parameters_snle(
-    snle,
-    snle_params,
-    observed_stats,
-    y_mean,
-    y_std,
+    snle: NLE,
+    snle_params: dict,
+    observed_stats: jax.Array,
+    y_mean: jax.Array,
+    y_std: jax.Array,
     num_samples: int = 1000,
     num_warmup: int = 200,
     num_chains: int = 4,
     sampler: Literal["nuts", "slice", "mala"] = "nuts",
     n_thin: int = 5,
-    rng_key=None,
+    rng_key = None,
     verbose: bool = True,
 ):
     """
