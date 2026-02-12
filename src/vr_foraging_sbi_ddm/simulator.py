@@ -81,8 +81,7 @@ def _simulate_one_window_impl(
     # Pre-generate InterSite gaps (NOT full inter-odor spacing)
     # These are the gaps between decision points
     intersite_gaps = (
-        config.interval_min
-        + random.exponential(key_intervals, shape=(config.total_sites,)) * config.interval_scale
+        config.interval_min + random.exponential(key_intervals, shape=(config.total_sites,)) * config.interval_scale
     )
 
     noise_samples = random.normal(key_noise, shape=(config.total_sites,))

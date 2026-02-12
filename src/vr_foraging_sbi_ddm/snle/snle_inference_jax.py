@@ -119,10 +119,11 @@ def train_snle(
 
     # --- 4. Create SNLE model ---
     fns = prior_fn, simulator.simulator_fn
-    snle = NLE(fns, flow) # oddly this is what SNLE is called in sbijax - https://sbijax.readthedocs.io/en/latest/sbijax.html#sbijax.NLE
+    snle = NLE(
+        fns, flow
+    )  # oddly this is what SNLE is called in sbijax - https://sbijax.readthedocs.io/en/latest/sbijax.html#sbijax.NLE
 
-
-        # --- 5. Simulate training data ---
+    # --- 5. Simulate training data ---
     print(f"\nSimulating {n_simulations} training samples...")
     rng_key, data_key = random.split(rng_key)
     data, _ = snle.simulate_data(data_key, n_simulations=n_simulations)
@@ -130,7 +131,7 @@ def train_snle(
 
     y_samples: jax.Array = jnp.array(data["y"])
     y_mean: jax.Array = y_samples.mean(axis=0)
-    y_std: jax.Array = y_samples.std(axis=0) + 1e-8 # Add small epsilon to prevent division by zero
+    y_std: jax.Array = y_samples.std(axis=0) + 1e-8  # Add small epsilon to prevent division by zero
 
     y_normalized: jax.Array = (y_samples - y_mean) / y_std
     theta_samples: jax.Array = data["theta"]["theta"]

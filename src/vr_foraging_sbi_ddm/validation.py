@@ -24,6 +24,7 @@ from sbijax import NLE
 from sbijax.nn import make_maf, make_spf
 from .simulator import JaxPatchForagingDdm
 
+
 def compute_sbc_metrics(
     snle: NLE,
     snle_params: dict,
@@ -102,7 +103,7 @@ def compute_sbc_metrics(
     test_times = []
     for test in range(n_tests):
         test_start = time.time()
-        
+
         # Print progress for all tests initially, then every 10
         if test < 5 or test % 10 == 0:
             print(f"  Test {test + 1}/{n_tests}...", end="", flush=True)
@@ -144,15 +145,15 @@ def compute_sbc_metrics(
             post_std = posterior_samples[:, i].std()
             z = (post_mean - true_theta[i]) / post_std
             z_scores[param].append(float(z))
-        
+
         # Timing and ETA
         test_time = time.time() - test_start
         test_times.append(test_time)
-        
+
         if show_timing:
             avg_time = sum(test_times) / len(test_times)
             remaining = (n_tests - test - 1) * avg_time
-            print(f" completed in {test_time:.1f}s (avg: {avg_time:.1f}s, ETA: {remaining/60:.1f}min)")
+            print(f" completed in {test_time:.1f}s (avg: {avg_time:.1f}s, ETA: {remaining / 60:.1f}min)")
 
     return {
         "ranks": ranks,
@@ -341,13 +342,13 @@ def validate_parameter_recovery(
         true_params.append(true_theta)
         posterior_means.append(posterior_samples.mean(axis=0))
         posterior_stds.append(posterior_samples.std(axis=0))
-        
+
         # Timing and ETA
         test_time = time.time() - test_start
         test_times.append(test_time)
         avg_time = sum(test_times) / len(test_times)
         remaining = (n_tests - test - 1) * avg_time
-        print(f" completed in {test_time:.1f}s (avg: {avg_time:.1f}s, ETA: {remaining/60:.1f}min)")
+        print(f" completed in {test_time:.1f}s (avg: {avg_time:.1f}s, ETA: {remaining / 60:.1f}min)")
 
     true_params = jnp.array(true_params)
     posterior_means = jnp.array(posterior_means)
@@ -427,7 +428,7 @@ def plot_recovery_scatter(recovery_results, save_path=None, figsize=(12, 3)):
         ax.grid(alpha=0.3)
 
     plt.tight_layout()
-    
+
     if save_path:
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
         print(f"Figure saved to {save_path}")
