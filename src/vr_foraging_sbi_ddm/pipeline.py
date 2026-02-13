@@ -15,14 +15,16 @@ from pathlib import Path
 from typing import Any
 
 import jax.numpy as jnp
+import matplotlib
 import matplotlib.pyplot as plt
+import numpy as np
 from jax import random
 from sbijax import plot_loss_profile
 
 from .models import Config, format_name
 from .simulator import JaxPatchForagingDdm, create_prior
 from .snle.snle_inference_jax import infer_parameters_snle, train_snle
-from .snle.snle_utils_jax import pairplot, plot_posterior_distributions
+from .snle.snle_utils_jax import pairplot, plot_posterior_distributions, print_inference_summary
 from .validation import (
     compute_sbc_metrics,
     plot_recovery_scatter,
@@ -59,14 +61,22 @@ def run_pipeline(
 
     All artifacts are saved to *output_dir*:
       output_dir/
-        model.pkl          - trained params, y_mean, y_std, config
-        config.json        - full config dump
-        run.log            - all stdout/print output
-        loss_profile.png   - training loss curve
-        posterior.png       - marginal posterior histograms
-        pairplot.png        - corner plot
-        recovery.png        - parameter recovery scatter
-        sbc.png             - SBC diagnostics
+        model.pkl              - trained params, losses, y_mean, y_std, config
+        config.json            - full config dump
+        run.log                - all stdout/print output
+        loss_profile.png       - training loss curve
+        posterior.png          - marginal posterior histograms
+        pairplot.png           - corner plot
+        posterior_samples.npy  - raw posterior samples (data for posterior.png / pairplot.png)
+        true_theta.npy         - true theta used for test inference
+        recovery.png           - parameter recovery scatter (if validation)
+        recovery_results.pkl   - recovery arrays: true_params, posterior_means, errors (if validation)
+        sbc.png                - SBC diagnostics (if validation)
+        sbc_results.pkl        - SBC arrays: ranks, z_scores (if validation)
+
+    Data duplication is avoided: losses are already in model.pkl so they are
+    not saved separately. recovery_results.pkl and sbc_results.pkl contain
+    only the data needed to reproduce the corresponding plots.
 
     Args:
         config: Pipeline configuration.
@@ -108,6 +118,7 @@ def _run(
     results: dict[str, Any],
 ) -> None:
     """Core pipeline logic (runs inside the tee context)."""
+    matplotlib.use("Agg")
     pipeline_start = time.time()
 
     # ------------------------------------------------------------------
@@ -242,7 +253,12 @@ def _run(
         rng_key=subkey,
     )
     print(f"Inference completed in {time.time() - infer_start:.1f}s")
+    print_inference_summary(posterior_samples, true_theta)
     results["posterior_samples"] = posterior_samples
+
+    # Save inference data (used by posterior.png and pairplot.png)
+    np.save(output_dir / "posterior_samples.npy", np.array(posterior_samples))
+    np.save(output_dir / "true_theta.npy", np.array(true_theta))
 
     # ------------------------------------------------------------------
     # 6. Plot posteriors
@@ -285,6 +301,14 @@ def _run(
             num_chains=config.num_chains,
         )
         plot_recovery_scatter(recovery_results, save_path=output_dir / "recovery.png")
+
+        # Save recovery data (true_params, posterior_means, errors)
+        recovery_serializable = {
+            k: np.array(v) if hasattr(v, "shape") else v for k, v in recovery_results.items()
+        }
+        with open(output_dir / "recovery_results.pkl", "wb") as f:
+            pickle.dump(recovery_serializable, f)
+
         results["recovery_results"] = recovery_results
 
         # ----------------------------------------------------------
@@ -307,6 +331,11 @@ def _run(
             num_chains=config.num_chains,
         )
         plot_sbc_diagnostics(sbc_results, save_path=output_dir / "sbc.png")
+
+        # Save SBC data (ranks, z_scores)
+        with open(output_dir / "sbc_results.pkl", "wb") as f:
+            pickle.dump(sbc_results, f)
+
         results["sbc_results"] = sbc_results
 
     total_time = time.time() - pipeline_start
