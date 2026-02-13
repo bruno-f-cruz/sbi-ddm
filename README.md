@@ -1,8 +1,7 @@
 # SBI-DDM: Simulation-Based Inference for Drift Diffusion Models
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![JAX](https://img.shields.io/badge/JAX-latest-orange.svg)](https://github.com/google/jax)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
+
 
 ## Overview
 
@@ -17,193 +16,175 @@ The classical Bayesian inference problem is: given observed data **x**, estimate
 3. **Trains** a neural density estimator (Masked Autoregressive Flow) to approximate p(x|θ)
 4. **Infers** the posterior via MCMC, using the learned likelihood as a surrogate
 
+---
+
+## How it works
+
+### Step 1: Simulate -- build a fake mouse
+
+We have a computer model (a **Drift Diffusion Model**, or DDM) that can generate realistic foraging behavior for *any* combination of the four parameters.
+
+### Step 2: Summarize -- compress behavior into numbers
+
+We compress each simulated session into **37 summary statistics** that capture the important patterns.
+
+### Step 3: Train -- teach a neural network the parameter-to-behavior mapping
+
+We train a neural density estimator (a **Masked Autoregressive Flow**, or MAF) on the 2 million (parameters, summary statistics) pairs. The network learns the mapping:
+
+> "If the parameters are *these values*, how likely is it that the summary statistics look like *this*?"
+
+In probability notation, it learns **p(summary stats | parameters)** -- the *likelihood*. This is the key contribution of the SNLE method: instead of deriving the likelihood mathematically (impossible for our DDM), we *learn* it from simulated examples.
+
+### Step 4: Infer -- run the process backwards
+
+Now, given a *real* mouse's behavior (summarized into the same 37 statistics), we use [Bayes' theorem](https://en.wikipedia.org/wiki/Bayes%27_theorem) to work backwards:
+
+> **posterior = likelihood x prior**
+>
+> p(parameters | observed behavior) ∝ p(observed behavior | parameters) x p(parameters)
+
+The learned neural network provides the likelihood. The prior encodes what parameter values are plausible before seeing any data. We use **MCMC sampling** (specifically the [NUTS](https://arxiv.org/abs/1111.4246) algorithm) to draw samples from the posterior distribution, giving us a full picture of which parameter values are consistent with the observed behavior.
+
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         SNLE PIPELINE OVERVIEW                              │
-│                                                                             │
-│  ┌──────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐  │
-│  │  Prior    │───>│  DDM         │───>│  Summary     │───>│  MAF Neural  │  │
-│  │  p(θ)    │    │  Simulator   │    │  Statistics  │    │  Likelihood  │  │
-│  │          │    │              │    │  (37 feat)   │    │  Estimator   │  │
-│  └──────────┘    └──────────────┘    └──────────────┘    └──────┬───────┘  │
-│       θ               x(θ)              s(x)                    │          │
-│                                                                  │          │
-│  INFERENCE:                                                      ▼          │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────────────────┐  │
-│  │  Observed    │───>│  Normalize   │───>│  MCMC Sampling (NumPyro/NUTS)│  │
-│  │  Data        │    │  Features    │    │  p(θ|x) ∝ p̂(x|θ) · p(θ)   │  │
-│  └──────────────┘    └──────────────┘    └──────────────────────────────┘  │
-│                                                    │                        │
-│                                                    ▼                        │
-│                                           Posterior Samples                 │
-└─────────────────────────────────────────────────────────────────────────────┘
+                    TRAINING PHASE
+    ┌──────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+    │  Prior   │--->│  DDM         │--->│  Summary     │--->│  Neural      │
+    │  p(θ)    │    │  Simulator   │    │  Statistics  │    │  Likelihood  │
+    │          │    │              │    │  (37 feat)   │    │  Estimator   │
+    └──────────┘    └──────────────┘    └──────────────┘    └──────┬───────┘
+         θ               x(θ)              s(x)                    │
+                                                                   │
+                    INFERENCE PHASE                                 v
+    ┌──────────────┐    ┌──────────────┐    ┌──────────────────────────────┐
+    │  Observed    │--->│  Compute     │--->│  MCMC Sampling               │
+    │  behavior    │    │  37 stats    │    │  p(θ|x) ∝ p̂(x|θ) · p(θ)   │
+    └──────────────┘    └──────────────┘    └──────────────────────────────┘
+                                                       │
+                                                       v
+                                              Posterior Samples
+                                          "these parameter values are
+                                           consistent with the data"
 ```
+
+### Step 5: Validate -- check that it actually works
+
+Before trusting the results on real data, we run two sanity checks using only simulated data (where we *know* the true parameters):
+
+- **Parameter Recovery**: Pick random true parameters, simulate data, run inference, check if we recover the original values. If we do, the pipeline works.
+- **Simulation-Based Calibration (SBC)**: A more rigorous statistical test. If the posterior is well-calibrated, true parameter values should fall uniformly within the posterior distribution across many test cases.
 
 ---
 
 ## Installation
 
 ```bash
-# Clone the repository
 git clone https://github.com/bruno-f-cruz/sbi-ddm.git
 cd sbi-ddm
-
-# Install with uv (recommended)
-uv pip install -e .
-
-# Or with pip
-pip install -e .
+uv sync        # install all dependencies
 ```
 
----
-
-## Quick Start
-
-See [notebooks/sbi_ddm_pipeline_demo.ipynb](notebooks/sbi_ddm_pipeline_demo.ipynb) for a complete walkthrough demonstrating:
-
-- **Option A: SNLE + MCMC** (Exact, slower) - Learns p(x|θ) and uses MCMC to sample the posterior
-- **Option B: NPE** (Fast, approximate) - Learns p(θ|x) directly via a single forward pass
-
-Both methods include validation via:
-- **Parameter Recovery**: Can we recover known parameters?
-- **Simulation-Based Calibration (SBC)**: Is the posterior properly calibrated?
+On Linux with a CUDA GPU, JAX will automatically use GPU acceleration.
 
 ---
 
-## The DDM Simulator
+## Usage
 
-The **Drift Diffusion Model** simulates patch-foraging decisions with 4 parameters:
+### Run the full pipeline for a single configuration
 
-| Parameter | Role | Range |
-|-----------|------|-------|
-| `drift_rate` | Rate of evidence accumulation toward leaving | [-0.3, 1.3] |
-| `reward_bump` | Evidence change after receiving reward (negative = stay longer) | [-1.3, 1.3] |
-| `failure_bump` | Evidence change after no reward (positive = leave sooner) | [-0.3, 2.0] |
-| `noise_std` | Stochastic noise in evidence accumulation | [0.0, 0.3] |
+```python
+from vr_foraging_sbi_ddm import Config, format_name
+from vr_foraging_sbi_ddm.pipeline import run_pipeline
 
-**Simulation mechanics** (per site in a window):
-1. Time advances by inter-site interval (exponential + fixed odor site length)
-2. Evidence accumulates: `evidence += drift_rate * dt + noise_std * N(0,1) * sqrt(dt)`
-3. If `evidence >= threshold`: leave patch, reset state
-4. If staying: check for reward (depleting probability), apply bump
+config = Config(n_simulations=500_000, n_iter=1000)
+results = run_pipeline(config)
 
-The simulator uses `jax.lax.while_loop` for JIT compilation and pre-generates all random values for efficiency.
+# All artifacts are saved to: ./results/snle_500K_lr0.001_ts5000_h128_l8_b256_37feat/
+#   model.pkl         - trained model
+#   config.json       - configuration used
+#   run.log           - full console output
+#   loss_profile.png  - training loss curve
+#   posterior.png     - marginal posterior histograms
+#   pairplot.png      - corner plot of all parameter pairs
+#   recovery.png      - parameter recovery scatter plots
+#   sbc.png           - calibration diagnostics
+```
+
+### Sweep over multiple configurations
+
+```python
+from vr_foraging_sbi_ddm import Config
+from vr_foraging_sbi_ddm.sweep import run_sweep
+
+configs = [
+    Config(n_simulations=500_000, hidden_dim=64, num_layers=4),
+    Config(n_simulations=1_000_000, hidden_dim=128, num_layers=8),
+    Config(n_simulations=2_000_000, hidden_dim=128, num_layers=8),
+]
+
+summary_df = run_sweep(configs, base_output_dir="./sweep_results")
+# Each config gets its own subfolder with all artifacts
+# A sweep_summary.csv is saved with metrics across all configs
+```
+
+### Use the notebook for interactive exploration
+
+See [notebooks/sbi_ddm_pipeline_demo.ipynb](notebooks/sbi_ddm_pipeline_demo.ipynb) for a step-by-step walkthrough.
 
 ---
 
-## Summary Statistics
-
-The model extracts 37 hand-crafted summary statistics from behavioral data:
-
-| Group | Count | Features |
-|-------|-------|----------|
-| Basic | 7 | max/mean/std time, mean/std stops, mean/std rewards |
-| Reward History | 4 | mean/std time after reward, mean/std time after failure |
-| Temporal | 5 | early/middle/late means, temporal trend, late-early difference |
-| Distribution | 4 | 25th/50th/75th percentiles, IQR |
-| Sequential | 3 | lag-1 autocorrelation, diff std, mean absolute change |
-| Reward | 3 | reward rate, mean reward trial, proportion with reward |
-| Patch | 3 | n_patches, mean sites/patch, stop rate |
-| Consistency | 8 | CV after reward/failure, transition reliability, predictability, local std, SNR, reward/failure effects |
-
----
-
-## Module Structure
+## Module structure
 
 ```
 src/vr_foraging_sbi_ddm/
-│
-├── simulator.py                  # DDM simulator (JIT-compiled JAX)
-├── feature_engineering.py        # 37 summary statistics
-├── models.py                     # Pydantic configuration
-├── validation.py                 # Parameter recovery & SBC
-├── run_validation.py             # CLI validation runner
+├── models.py                    # Config class + format_name()
+├── simulator.py                 # DDM simulator (JIT-compiled JAX)
+├── feature_engineering.py       # 37 summary statistics
+├── pipeline.py                  # run_pipeline() -- full single-config pipeline
+├── sweep.py                     # run_sweep() -- loop over multiple configs
+├── validation.py                # Parameter recovery & SBC
+├── __init__.py                  # Exports Config, format_name
 │
 └── snle/
-    ├── snle_inference_jax.py     # SNLE training & inference (MCMC)
-    ├── npe_inference_jax.py      # NPE training & inference (direct)
-    ├── snle_utils_jax.py         # Utilities & visualization
-    │
-    └── snle_sweep/
-        ├── snle_parameter_sweep_jax.py    # Hyperparameter search
-        ├── analyze_sweep.py               # Sweep result analysis
-        └── compare_models.py              # Multi-model SBC comparison
+    ├── snle_inference_jax.py    # train_snle(), infer_parameters_snle()
+    └── snle_utils_jax.py        # Plotting, model save/load, diagnostics
 ```
 
 ---
 
-## Data Flow
+## Configuration
 
-```
-TRAINING:
-  Prior p(θ) ──sample──> θ_i (2M samples)
-       │
-       ▼
-  DDM Simulator ──simulate──> window_data_i (max_sites × 3)
-       │
-       ▼
-  compute_summary_stats() ──extract──> s_i (37-dim vector)
-       │
-       ▼
-  Normalize: s_norm = (s - mean) / std
-       │
-       ▼
-  sbijax.NLE.fit() ──train──> MAF flow params (learns p̂(s|θ))
-       │
-       ▼
-  Save: {snle_params, y_mean, y_std, losses, config}
+All settings are managed through the `Config` class, which reads from `config.yml`, environment variables, or direct Python arguments (in that priority order). Key settings:
 
-INFERENCE:
-  Observed behavioral data ──extract──> s_obs (37-dim)
-       │
-       ▼
-  Normalize: s_norm = (s_obs - y_mean) / y_std
-       │
-       ▼
-  sbijax.NLE.sample_posterior() ──MCMC──> θ_posterior (chains × samples × 4)
-       │
-       ▼
-  Analysis: marginal distributions, corner plots, diagnostics
-
-VALIDATION:
-  For each test:
-    θ_true ~ Prior ──> simulate ──> s_obs ──> infer ──> θ_posterior
-    Compute: rank(θ_true in θ_posterior), z-score
-  Aggregate: rank histograms (should be uniform), z-scores (should be N(0,1))
-```
+| Group | Parameter | Default | Description |
+|-------|-----------|---------|-------------|
+| **Training** | `n_simulations` | 2,000,000 | How many (parameter, behavior) pairs to generate |
+| | `n_iter` | 1,000 | Maximum training iterations for the neural network |
+| | `batch_size` | 256 | Samples per training step |
+| | `learning_rate` | 0.001 | Initial learning rate (decays over time) |
+| **Architecture** | `hidden_dim` | 128 | Width of each neural network layer |
+| | `num_layers` | 8 | Depth of the normalizing flow |
+| **MCMC** | `num_samples` | 500 | Posterior samples to draw per chain |
+| | `num_warmup` | 200 | Warmup steps before sampling |
+| | `num_chains` | 2 | Independent MCMC chains |
+| **Simulator** | `window_size` | 100 | Sites per observation window |
+| | `n_feat` | 37 | Number of summary statistics |
 
 ---
 
-## Key Dependencies
+## Key dependencies
 
 | Package | Role |
 |---------|------|
-| `jax` | Array computation, JIT compilation, automatic differentiation |
-| `sbijax` | SNLE implementation (NLE class, MAF flows) |
-| `tensorflow-probability` | Prior distributions (Uniform, JointDistributionNamed) |
-| `numpyro` | MCMC sampling (NUTS) used internally by sbijax |
-| `optax` | Optimizer (Adam with exponential decay schedule) |
-| `pydantic-settings` | Configuration management with YAML support |
-| `arviz` | Posterior sample extraction and diagnostics |
-| `matplotlib` / `scipy` | Visualization and statistical tests |
+| [jax](https://github.com/google/jax) | Fast array computation with JIT compilation and GPU support |
+| [sbijax](https://github.com/dirmeier/sbijax) | SNLE implementation (NLE class, Masked Autoregressive Flows) |
+| [tensorflow-probability](https://www.tensorflow.org/probability) | Prior distributions (Uniform, JointDistributionNamed) |
+| [numpyro](https://num.pyro.ai/) | MCMC sampling backend (NUTS) used internally by sbijax |
+| [optax](https://github.com/google-deepmind/optax) | Optimizer (Adam with exponential decay schedule) |
+| [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/) | Configuration management with YAML support |
 
 ---
 
-## Citation
+## References
 
-If you use this code in your research, please cite:
-
-```bibtex
-@article{papamakarios2019sequential,
-  title={Sequential neural likelihood: Fast likelihood-free inference with autoregressive flows},
-  author={Papamakarios, George and Sterratt, David and Murray, Iain},
-  journal={arXiv preprint arXiv:1805.07226},
-  year={2019}
-}
-```
-
----
-
-## License
-
-MIT License - see [LICENSE](LICENSE) file for details.
+Papamakarios, G., Sterratt, D., & Murray, I. (2019). Sequential Neural Likelihood: Fast Likelihood-Free Inference with Autoregressive Flows. *Proceedings of the 22nd International Conference on Artificial Intelligence and Statistics (AISTATS)*. [arXiv:1805.07226](https://arxiv.org/abs/1805.07226)
