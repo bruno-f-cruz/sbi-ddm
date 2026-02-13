@@ -1,8 +1,9 @@
-from typing import Callable
+import functools
+from typing import Callable, NamedTuple
 
 import jax
 import jax.numpy as jnp
-from jax import Array, jit, random, vmap
+from jax import Array, random, vmap
 from jax.typing import ArrayLike
 from tensorflow_probability.substrates.jax import distributions as tfd
 
@@ -28,6 +29,147 @@ def prepare_raw_data(window_data: jax.Array) -> jax.Array:
     """
     # Simply flatten: (n_sites, 3) -> (n_sites * 3,)
     return window_data.flatten()
+
+
+class _SimConfig(NamedTuple):
+    """Hashable simulation configuration for JIT cache reuse.
+
+    When multiple JaxPatchForagingDdm instances share identical parameters,
+    JAX reuses the same compiled code instead of recompiling per instance.
+    """
+
+    total_sites: int
+    output_sites: int
+    initial_prob: float
+    depletion_rate: float
+    threshold: float
+    start_point: float
+    interval_min: float
+    interval_scale: float
+    odor_site_length: float
+    n_feat: int
+
+
+@functools.partial(jax.jit, static_argnames=("config",))
+def _simulate_one_window_impl(
+    theta: jax.Array, rng_key: jax.Array, *, config: _SimConfig
+) -> tuple[jax.Array, jax.Array]:
+    """
+    Core JIT-compiled simulation function.
+
+    Defined at module level so JAX caches the compilation by config.
+    Instances with identical parameters share the same compiled code,
+    avoiding redundant recompilation during sweeps and validation.
+
+    Args:
+        theta: (4,) array [drift_rate, reward_bump, failure_bump, noise_std]
+        rng_key: JAX random key
+        config: Static simulation configuration (hashable, used as JIT cache key)
+
+    Returns:
+        window_data: (output_sites, 3) array [time_in_patch, reward, stopped]
+        summary_stats: feature array of summary statistics
+    """
+    drift_rate, reward_bump, failure_bump, noise_std = theta
+
+    # Pre-allocate arrays for full simulation (burn-in + output)
+    window_data = jnp.zeros((config.total_sites, 3))
+
+    # Split RNG keys for different random operations
+    key_intervals, key_noise, key_rewards = random.split(rng_key, 3)
+
+    # Pre-generate InterSite gaps (NOT full inter-odor spacing)
+    # These are the gaps between decision points
+    intersite_gaps = (
+        config.interval_min + random.exponential(key_intervals, shape=(config.total_sites,)) * config.interval_scale
+    )
+
+    noise_samples = random.normal(key_noise, shape=(config.total_sites,))
+    reward_samples = random.uniform(key_rewards, shape=(config.total_sites,))
+
+    # State tuple for while loop
+    def cond_fn(state: tuple[Array, Array, Array, Array, Array, Array]) -> bool:
+        evidence, num_rewards, site_idx, global_time, patch_time, window_data = state
+        return site_idx < config.total_sites
+
+    def body_fn(
+        state: tuple[Array, Array, Array, Array, Array, Array],
+    ) -> tuple[Array, Array, Array, Array, Array, Array]:
+        evidence, num_rewards, site_idx, global_time, patch_time, window_data = state
+
+        # Get pre-generated random values for this site
+        intersite_gap = intersite_gaps[site_idx]
+        noise = noise_samples[site_idx]
+        reward_sample = reward_samples[site_idx]
+
+        # Calculate actual interval:
+        # - First site (site_idx=0): just the InterSite gap
+        # - Subsequent sites: InterSite gap + OdorSite length (50 cm)
+        dt = jnp.where(
+            site_idx == 0,
+            intersite_gap,  # First site: just gap from patch entry
+            config.odor_site_length + intersite_gap,  # OdorSite of previous site + gap
+        )
+
+        # Update time and evidence
+        global_time = global_time + dt
+        patch_time = patch_time + dt  # Time spent in current patch
+        evidence = evidence + drift_rate * dt
+        evidence = jnp.where(noise_std > 0, evidence + noise_std * noise * jnp.sqrt(dt), evidence)
+
+        # Check if we should leave
+        should_leave = evidence >= config.threshold
+
+        # If not leaving, check for reward
+        reward_prob = reward_probability(num_rewards, config.initial_prob, config.depletion_rate)
+        reward = jnp.where(should_leave, 0, (reward_sample < reward_prob).astype(jnp.float32))
+        stopped = jnp.where(should_leave, 0, 1)
+
+        # Store data
+        window_data = window_data.at[site_idx].set(jnp.array([patch_time, reward, stopped]))
+
+        # Update evidence based on outcome
+        evidence = jnp.where(
+            should_leave,
+            config.start_point,  # reset evidence if leaving
+            evidence + jnp.where(reward > 0, reward_bump, failure_bump),
+        )
+
+        # Update state
+        num_rewards = jnp.where(should_leave, 0, num_rewards + reward)  # reset if leaving
+        patch_time = jnp.where(should_leave, 0.0, patch_time)  # reset patch time if leaving
+
+        return (evidence, num_rewards, site_idx + 1, global_time, patch_time, window_data)
+
+    # Initial state
+    init_state = (
+        jnp.array(config.start_point),  # evidence
+        jnp.array(0.0),  # num_rewards
+        jnp.array(0),  # site_idx
+        jnp.array(0.0),  # global_time
+        jnp.array(0.0),  # patch_time
+        window_data,  # window_data array
+    )
+
+    # Run simulation
+    final_state = jax.lax.while_loop(cond_fn, body_fn, init_state)
+    _, _, _, _, _, full_window_data = final_state
+
+    # Discard burn-in sites, keep the last output_sites
+    window_data = full_window_data[config.total_sites - config.output_sites :, :]
+
+    summary_stats: jax.Array
+    match config.n_feat:
+        case 300:
+            summary_stats = prepare_raw_data(window_data)
+        case 37:
+            from vr_foraging_sbi_ddm.feature_engineering import compute_summary_stats
+
+            summary_stats = compute_summary_stats(window_data)
+        case _:
+            raise ValueError(f"Unsupported n_feat value: {config.n_feat}. Supported values: 300, 37")
+
+    return window_data, summary_stats
 
 
 class JaxPatchForagingDdm:
@@ -61,7 +203,8 @@ class JaxPatchForagingDdm:
         odor_site_length: float = 50.0,  # Physical length of OdorSite (cm)
         max_sites_per_window: int = 500,
         n_feat: int = 37,
-    ) -> None:  # determines whether input is summary stats or raw data
+        burn_in_sites: int | None = None,
+    ) -> None:
 
         self.initial_prob = initial_prob
         self.depletion_rate = depletion_rate
@@ -79,127 +222,27 @@ class JaxPatchForagingDdm:
         self.interval_scale = interval_scale / interval_normalization
         self.odor_site_length = odor_site_length / interval_normalization
 
-        self.max_sites_per_window = 2 * max_sites_per_window
+        # Burn-in: defaults to max_sites_per_window (matching original 2x behavior).
+        # Reduce to speed up simulation at the cost of less burn-in for steady state.
+        if burn_in_sites is None:
+            burn_in_sites = max_sites_per_window
 
-        # JIT compile the core simulation function
-        self._simulate_one_window_jit = jit(self._simulate_one_window_core)
+        self._config = _SimConfig(
+            total_sites=max_sites_per_window + burn_in_sites,
+            output_sites=max_sites_per_window,
+            initial_prob=initial_prob,
+            depletion_rate=depletion_rate,
+            threshold=threshold,
+            start_point=start_point,
+            interval_min=self.interval_min,
+            interval_scale=self.interval_scale,
+            odor_site_length=self.odor_site_length,
+            n_feat=n_feat,
+        )
 
-        # determines structure of input data
+        # Backward-compatible attributes
+        self.max_sites_per_window = self._config.total_sites
         self.n_feat = n_feat
-
-    def _simulate_one_window_core(self, theta: jax.Array, rng_key: jax.Array) -> tuple[jax.Array, jax.Array]:
-        """
-        Core JIT-compiled function to simulate one window.
-        Uses jax.lax.while_loop for efficient compilation.
-
-        Args:
-            theta: (4,) array [drift_rate, reward_bump, failure_bump, noise_std]
-            rng_key: JAX random key
-
-        Returns:
-            window_data: (max_sites, 3) array [time_in_patch, reward, stopped]
-            summary_stats: (37,) array of summary statistics
-        """
-        drift_rate, reward_bump, failure_bump, noise_std = theta
-
-        # Pre-allocate arrays
-        window_data = jnp.zeros((self.max_sites_per_window, 3))
-
-        # Split RNG keys for different random operations
-        key_intervals, key_noise, key_rewards = random.split(rng_key, 3)
-
-        # Pre-generate InterSite gaps (NOT full inter-odor spacing)
-        # These are the gaps between decision points
-        intersite_gaps = (
-            self.interval_min
-            + random.exponential(key_intervals, shape=(self.max_sites_per_window,)) * self.interval_scale
-        )
-
-        noise_samples = random.normal(key_noise, shape=(self.max_sites_per_window,))
-        reward_samples = random.uniform(key_rewards, shape=(self.max_sites_per_window,))
-
-        # State tuple for while loop
-        def cond_fn(state: tuple[Array, Array, Array, Array, Array, Array]) -> bool:
-            evidence, num_rewards, site_idx, global_time, patch_time, window_data = state
-            return site_idx < self.max_sites_per_window
-
-        def body_fn(
-            state: tuple[Array, Array, Array, Array, Array, Array],
-        ) -> tuple[Array, Array, Array, Array, Array, Array]:
-            evidence, num_rewards, site_idx, global_time, patch_time, window_data = state
-
-            # Get pre-generated random values for this site
-            intersite_gap = intersite_gaps[site_idx]
-            noise = noise_samples[site_idx]
-            reward_sample = reward_samples[site_idx]
-
-            # Calculate actual interval:
-            # - First site (site_idx=0): just the InterSite gap
-            # - Subsequent sites: InterSite gap + OdorSite length (50 cm)
-            dt = jnp.where(
-                site_idx == 0,
-                intersite_gap,  # First site: just gap from patch entry
-                self.odor_site_length + intersite_gap,  # OdorSite of previous site + gap
-            )
-
-            # Update time and evidence
-            global_time = global_time + dt
-            patch_time = patch_time + dt  # Time spent in current patch
-            evidence = evidence + drift_rate * dt
-            evidence = jnp.where(noise_std > 0, evidence + noise_std * noise * jnp.sqrt(dt), evidence)
-
-            # Check if we should leave
-            should_leave = evidence >= self.threshold
-
-            # If not leaving, check for reward
-            reward_prob = reward_probability(num_rewards, self.initial_prob, self.depletion_rate)
-            reward = jnp.where(should_leave, 0, (reward_sample < reward_prob).astype(jnp.float32))
-            stopped = jnp.where(should_leave, 0, 1)
-
-            # Store data
-            window_data = window_data.at[site_idx].set(jnp.array([patch_time, reward, stopped]))
-
-            # Update evidence based on outcome
-            evidence = jnp.where(
-                should_leave,
-                self.start_point,  # reset evidence if leaving
-                evidence + jnp.where(reward > 0, reward_bump, failure_bump),
-            )
-
-            # Update state
-            num_rewards = jnp.where(should_leave, 0, num_rewards + reward)  # reset if leaving
-            patch_time = jnp.where(should_leave, 0.0, patch_time)  # reset patch time if leaving
-
-            return (evidence, num_rewards, site_idx + 1, global_time, patch_time, window_data)
-
-        # Initial state
-        init_state = (
-            jnp.array(self.start_point),  # evidence
-            jnp.array(0.0),  # num_rewards
-            jnp.array(0),  # site_idx
-            jnp.array(0.0),  # global_time
-            jnp.array(0.0),  # patch_time
-            window_data,  # window_data array
-        )
-
-        # Run simulation
-        final_state = jax.lax.while_loop(cond_fn, body_fn, init_state)
-        _, _, _, _, _, double_window_data = final_state
-
-        window_data = double_window_data[(int(self.max_sites_per_window / 2)) :, :]
-
-        summary_stats: jax.Array
-        match self.n_feat:
-            case 300:
-                summary_stats = prepare_raw_data(window_data)
-            case 37:
-                from vr_foraging_sbi_ddm.feature_engineering import compute_summary_stats
-
-                summary_stats = compute_summary_stats(window_data)
-            case _:
-                raise ValueError(f"Unsupported n_feat value: {self.n_feat}. Supported values: 300, 37")
-
-        return window_data, summary_stats
 
     def simulate_one_window(self, theta: ArrayLike, rng_key: jax.Array) -> tuple[jax.Array, jax.Array]:
         """
@@ -214,9 +257,7 @@ class JaxPatchForagingDdm:
             summary_stats: (37,) array of summary statistics
         """
         theta = jnp.array(theta)
-        window_data, summary_stats = self._simulate_one_window_jit(theta, rng_key)
-
-        return window_data, summary_stats
+        return _simulate_one_window_impl(theta, rng_key, config=self._config)
 
     # --- Define simulator function matching sbijax API ---
     def simulator_fn(self, *, seed: jax.Array, theta: jax.Array | dict[str, jax.Array]) -> jax.Array:
@@ -242,9 +283,12 @@ class JaxPatchForagingDdm:
         # Generate keys
         keys = random.split(seed, n_batch)
 
-        # Vectorized simulation
+        # Call JIT'd function directly — avoids redundant jnp.array()
+        # conversion per element that simulate_one_window would add
+        config = self._config
+
         def simulate_one(key, th):
-            _, stats = self.simulate_one_window(th, key)
+            _, stats = _simulate_one_window_impl(th, key, config=config)
             return stats
 
         x = vmap(simulate_one)(keys, theta_array)

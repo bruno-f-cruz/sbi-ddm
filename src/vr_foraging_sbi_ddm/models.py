@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 import pydantic_settings
-from pydantic import Field, computed_field, model_validator
+from pydantic import Field, model_validator
 
 # ============================================================================
 # Configuration
@@ -27,11 +29,13 @@ class Config(pydantic_settings.BaseSettings):
         default=["Methyl_Butyrate", "Alpha_pinene"], description="Types of odors used in experiments"
     )
 
-    @computed_field
-    @property
-    def odor_display_names(self) -> dict[str, str]:
-        """Display names for odor types (converts snake_case to Title Case with spaces)."""
-        return {odor: odor.replace("_", " ").title() for odor in self.odor_types}
+    odor_display_names: dict[str, str] = Field(
+        default={
+            "Methyl_Butyrate": "Methyl Butyrate",
+            "Alpha_pinene": "Alpha-pinene",
+        },
+        description="Mapping of odor types to display names for plots",
+    )
 
     # Task parameters
     interval_min: float = Field(default=20.0, gt=0.0, description="Minimum interval value")
@@ -117,3 +121,39 @@ class Config(pydantic_settings.BaseSettings):
             file_secret_settings,
             pydantic_settings.YamlConfigSettingsSource(settings_cls),
         )
+
+
+def format_name(
+    config: Config,
+    template: str = "snle_{n_sims}_lr{lr}_ts{ts}_h{hd}_l{nl}_b{bs}_{nf}feat",
+) -> str:
+    """Generate a unique folder/file name from config.
+
+    Users can pass a custom template string with placeholders:
+      {n_sims}, {lr}, {ts}, {hd}, {nl}, {bs}, {nf}, {seed}
+
+    Examples:
+        format_name(config)
+        # -> "snle_2M_lr0.001_ts5000_h128_l8_b256_37feat"
+
+        format_name(config, template="{n_sims}_seed{seed}")
+        # -> "2M_seed0"
+    """
+    n_sims = config.n_simulations
+    if n_sims >= 1_000_000:
+        n_sims_str = f"{n_sims // 1_000_000}M"
+    elif n_sims >= 1_000:
+        n_sims_str = f"{n_sims // 1_000}K"
+    else:
+        n_sims_str = str(n_sims)
+
+    return template.format(
+        n_sims=n_sims_str,
+        lr=config.learning_rate,
+        ts=config.transition_steps,
+        hd=config.hidden_dim,
+        nl=config.num_layers,
+        bs=config.batch_size,
+        nf=config.n_feat,
+        seed=config.seed,
+    )
