@@ -47,7 +47,8 @@ class _TeeStream(io.TextIOBase):
 
     def flush(self) -> None:
         self._stream.flush()
-        self._file.flush()
+        if not self._file.closed:
+            self._file.flush()
 
 
 def run_pipeline(
@@ -119,6 +120,11 @@ def _run(
 ) -> None:
     """Core pipeline logic (runs inside the tee context)."""
     matplotlib.use("Agg")
+    plt.rcParams.update({
+        "text.usetex": False,
+        "font.family": "serif",
+        "font.serif": ["DejaVu Serif"],
+    })
     pipeline_start = time.time()
 
     # ------------------------------------------------------------------
