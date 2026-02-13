@@ -6,8 +6,6 @@ Purpose: Train neural likelihood estimator and run MCMC inference for patch-leve
 
 from __future__ import annotations
 
-import pickle
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Literal
 
 import jax

@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 import pydantic_settings
-from pydantic import Field, computed_field, model_validator
+from pydantic import Field, model_validator
 
 # ============================================================================
 # Configuration
@@ -119,3 +121,39 @@ class Config(pydantic_settings.BaseSettings):
             file_secret_settings,
             pydantic_settings.YamlConfigSettingsSource(settings_cls),
         )
+
+
+def format_name(
+    config: Config,
+    template: str = "snle_{n_sims}_lr{lr}_ts{ts}_h{hd}_l{nl}_b{bs}_{nf}feat",
+) -> str:
+    """Generate a unique folder/file name from config.
+
+    Users can pass a custom template string with placeholders:
+      {n_sims}, {lr}, {ts}, {hd}, {nl}, {bs}, {nf}, {seed}
+
+    Examples:
+        format_name(config)
+        # -> "snle_2M_lr0.001_ts5000_h128_l8_b256_37feat"
+
+        format_name(config, template="{n_sims}_seed{seed}")
+        # -> "2M_seed0"
+    """
+    n_sims = config.n_simulations
+    if n_sims >= 1_000_000:
+        n_sims_str = f"{n_sims // 1_000_000}M"
+    elif n_sims >= 1_000:
+        n_sims_str = f"{n_sims // 1_000}K"
+    else:
+        n_sims_str = str(n_sims)
+
+    return template.format(
+        n_sims=n_sims_str,
+        lr=config.learning_rate,
+        ts=config.transition_steps,
+        hd=config.hidden_dim,
+        nl=config.num_layers,
+        bs=config.batch_size,
+        nf=config.n_feat,
+        seed=config.seed,
+    )

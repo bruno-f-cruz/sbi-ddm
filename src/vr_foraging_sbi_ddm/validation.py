@@ -9,19 +9,15 @@ This module provides tools for validating SNLE models through:
 
 # Disable LaTeX rendering in matplotlib
 import time
+
+import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 from jax import random
-from scipy.stats import kstest, norm
-from typing import Literal
-
-import jax
-import jax.numpy as jnp
-import optax
-from jax import random
 from sbijax import NLE
-from sbijax.nn import make_maf, make_spf
+from scipy.stats import kstest, norm
+
 from .simulator import JaxPatchForagingDdm
 
 

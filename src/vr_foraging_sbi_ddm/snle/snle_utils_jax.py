@@ -24,7 +24,6 @@ from ..models import Config
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
-    from matplotlib.figure import Figure
     from sbijax import NLE
     from tensorflow_probability.substrates.jax import distributions as tfd
 
@@ -153,6 +152,7 @@ def pairplot(
     param_names: list[str] | None = None,
     figsize_per_param: float = 2.5,
     grid_points: int = 100,
+    save_path: str | Path | None = None,
 ) -> None:
     """Lower-triangle corner plot with 2D filled KDEs (off-diagonal),
     1D KDEs (diagonal), and red 'X' for true parameters.
@@ -163,6 +163,7 @@ def pairplot(
         param_names: Optional parameter names for axis labels.
         figsize_per_param: Figure size per parameter dimension.
         grid_points: Number of grid points for KDE evaluation.
+        save_path: Optional path to save figure.
     """
     if isinstance(posterior_samples, jnp.ndarray):
         posterior_samples = np.array(posterior_samples)
@@ -218,7 +219,14 @@ def pairplot(
     axes[0, 1].legend(handles=handles, loc="upper left")
 
     plt.tight_layout()
-    plt.show()
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"Pairplot saved to {save_path}")
+    else:
+        plt.show()
+
+    plt.close()
 
 
 def compare_snle_vs_simulator(
@@ -558,7 +566,7 @@ def load_model(model_path: Path) -> dict[str, Any]:
 
     snle: NLE = NLE((prior_fn, simulator.simulator_fn), flow)
 
-    print(f"Model loaded successfully")
+    print("Model loaded successfully")
     print(f"  Features: {n_features}")
     print(f"  Architecture: {config.num_layers} layers x {config.hidden_dim} hidden units")
 
@@ -572,54 +580,3 @@ def load_model(model_path: Path) -> dict[str, Any]:
         "prior_fn": prior_fn,
         "model_dir": model_dir,
     }
-
-
-def get_model_directory(config: Config, make_dir: bool = False) -> tuple[Path, Path]:
-    """Create descriptive directory name from config parameters and handle duplicates.
-
-    Example output: snle_2M_lr0.0001_ts200_h128_l8_b2048_23feat/
-
-    Args:
-        config: Configuration settings.
-        make_dir: If True, create new directory with unique suffix if one already exists.
-
-    Returns:
-        model_dir: Path to model directory.
-        checkpoint_dir: Path to checkpoint subdirectory.
-    """
-    n_sims: int = config.n_simulations
-    hidden_dim: int = config.hidden_dim
-    num_layers: int = config.num_layers
-    batch_size: int = config.batch_size
-    learning_rate: float = config.learning_rate
-    transition_steps: int = config.transition_steps
-    n_feat: int = config.n_feat
-    base_output_dir: Path = config.base_output_dir
-
-    if n_sims >= 1_000_000:
-        n_sims_str = f"{n_sims // 1_000_000}M"
-    elif n_sims >= 1_000:
-        n_sims_str = f"{n_sims // 1_000}K"
-    else:
-        n_sims_str = str(n_sims)
-
-    base_name: str = (
-        f"snle_{n_sims_str}_lr{learning_rate}_ts{transition_steps}"
-        f"_h{hidden_dim}_l{num_layers}_b{batch_size}_{n_feat}feat"
-    )
-
-    model_dir: Path = base_output_dir / base_name
-    if make_dir:
-        counter: int = 0
-        while model_dir.exists() and any(model_dir.iterdir()):
-            model_dir = base_output_dir / f"{base_name}_{counter}"
-            counter += 1
-
-    model_dir.mkdir(parents=True, exist_ok=True)
-    checkpoint_dir: Path = model_dir / "checkpoints"
-    checkpoint_dir.mkdir(exist_ok=True)
-
-    print(f"Model directory: {model_dir}")
-    print(f"Checkpoint directory: {checkpoint_dir}")
-
-    return model_dir, checkpoint_dir
