@@ -105,6 +105,7 @@ def run_pipeline(
         with contextlib.redirect_stdout(tee):
             _run(config, output_dir, skip_validation, n_recovery_tests, n_sbc_tests, results)
     finally:
+        tee.close()
         log_file.close()
 
     return results
