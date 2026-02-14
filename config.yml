@@ -1,0 +1,75 @@
+# ============================================================================
+# SBI-DDM Configuration Defaults
+# ============================================================================
+# This file contains default values for the Config class
+# You can override these by creating your own config.yml or setting environment variables
+
+# Data paths
+base_path: ./data
+base_output_dir: ./results
+
+# Feature settings
+window_size: 100
+n_feat: 37
+
+# Odor configuration
+odor_types:
+  - Methyl_Butyrate
+  - Alpha_pinene
+
+odor_display_names:
+  Methyl_Butyrate: Methyl Butyrate
+  Alpha_pinene: Alpha-pinene
+
+# Task parameters
+inter_site_min: 20.0
+inter_site_exp_alpha: 19.0
+inter_site_max: 1000000.0
+odor_site_length: 50.0
+length_normalizing_factor: 88.73
+
+# Prior bounds
+prior_low:
+  - -0.3   # drift_rate
+  - -1.3   # reward_bump
+  - -0.3   # failure_bump
+  - 0.0    # noise_std
+
+prior_high:
+  - 1.3    # drift_rate
+  - 1.3    # reward_bump
+  - 2.0    # failure_bump
+  - 0.3    # noise_std
+
+param_names:
+  - drift_rate
+  - reward_bump
+  - failure_bump
+  - noise_std
+
+# Training parameters
+n_simulations: 2000000
+n_iter: 1000
+batch_size: 256
+n_early_stopping_patience: 5
+
+# Model architecture
+hidden_dim: 128
+num_layers: 8
+
+# Optimizer settings
+learning_rate: 0.001
+transition_steps: 5000
+decay_rate: 0.999
+
+# Checkpoint settings
+checkpoint_every: 20
+force_retrain: false
+
+# Sampling parameters
+num_samples: 500
+num_warmup: 200
+num_chains: 2
+
+# Random seed
+seed: 0
