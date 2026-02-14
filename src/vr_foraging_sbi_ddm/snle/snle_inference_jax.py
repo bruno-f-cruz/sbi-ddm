@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Callable, Literal
 
-import tensorflow as tf
-
 import jax
 import jax.numpy as jnp
 import optax

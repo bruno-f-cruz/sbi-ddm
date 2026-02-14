@@ -120,11 +120,13 @@ def _run(
 ) -> None:
     """Core pipeline logic (runs inside the tee context)."""
     matplotlib.use("Agg")
-    plt.rcParams.update({
-        "text.usetex": False,
-        "font.family": "serif",
-        "font.serif": ["DejaVu Serif"],
-    })
+    plt.rcParams.update(
+        {
+            "text.usetex": False,
+            "font.family": "serif",
+            "font.serif": ["DejaVu Serif"],
+        }
+    )
     pipeline_start = time.time()
 
     # ------------------------------------------------------------------
@@ -140,9 +142,10 @@ def _run(
         depletion_rate=-0.1,
         threshold=1.0,
         start_point=0.0,
-        interval_min=config.interval_min,
-        interval_scale=config.interval_scale,
-        interval_normalization=config.interval_normalization,
+        inter_site_min=config.inter_site_min,
+        inter_site_exp_alpha=config.inter_site_exp_alpha,
+        inter_site_max=config.inter_site_max,
+        length_normalizing_factor=config.length_normalizing_factor,
         odor_site_length=config.odor_site_length,
         max_sites_per_window=config.window_size,
         n_feat=config.n_feat,
@@ -309,9 +312,7 @@ def _run(
         plot_recovery_scatter(recovery_results, save_path=output_dir / "recovery.png")
 
         # Save recovery data (true_params, posterior_means, errors)
-        recovery_serializable = {
-            k: np.array(v) if hasattr(v, "shape") else v for k, v in recovery_results.items()
-        }
+        recovery_serializable = {k: np.array(v) if hasattr(v, "shape") else v for k, v in recovery_results.items()}
         with open(output_dir / "recovery_results.pkl", "wb") as f:
             pickle.dump(recovery_serializable, f)
 

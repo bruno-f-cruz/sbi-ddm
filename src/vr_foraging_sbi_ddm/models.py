@@ -38,10 +38,13 @@ class Config(pydantic_settings.BaseSettings):
     )
 
     # Task parameters
-    interval_min: float = Field(default=20.0, gt=0.0, description="Minimum interval value")
-    interval_scale: float = Field(default=19.0, gt=0.0, description="Interval scale factor")
+    inter_site_min: float = Field(default=20.0, gt=0.0, description="Minimum inter-site gap (cm)")
+    inter_site_exp_alpha: float = Field(default=19.0, gt=0.0, description="Exponential scale for inter-site gap (cm)")
+    inter_site_max: float = Field(default=1e6, gt=0.0, description="Maximum inter-site gap for truncation (cm)")
     odor_site_length: float = Field(default=50.0, gt=0.0, description="Length of odor site")
-    interval_normalization: float = Field(default=88.73, gt=0.0, description="Normalization factor for intervals")
+    length_normalizing_factor: float = Field(
+        default=88.73, gt=0.0, description="Factor to normalize all lengths (cm) to dimensionless units"
+    )
 
     # Prior bounds
     prior_low: list[float] = Field(

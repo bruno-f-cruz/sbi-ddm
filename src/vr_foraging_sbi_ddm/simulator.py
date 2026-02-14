@@ -44,8 +44,9 @@ class _SimConfig(NamedTuple):
     depletion_rate: float
     threshold: float
     start_point: float
-    interval_min: float
-    interval_scale: float
+    inter_site_min: float
+    inter_site_exp_alpha: float
+    inter_site_max: float
     odor_site_length: float
     n_feat: int
 
@@ -80,9 +81,11 @@ def _simulate_one_window_impl(
 
     # Pre-generate InterSite gaps (NOT full inter-odor spacing)
     # These are the gaps between decision points
-    intersite_gaps = (
-        config.interval_min + random.exponential(key_intervals, shape=(config.total_sites,)) * config.interval_scale
-    )
+    # Truncated exponential on [min, max] with scale alpha (inverse CDF)
+    u = random.uniform(key_intervals, shape=(config.total_sites,))
+    range_val = config.inter_site_max - config.inter_site_min
+    cdf_max = 1.0 - jnp.exp(-range_val / config.inter_site_exp_alpha)
+    intersite_gaps = config.inter_site_min - config.inter_site_exp_alpha * jnp.log(1.0 - u * cdf_max)
 
     noise_samples = random.normal(key_noise, shape=(config.total_sites,))
     reward_samples = random.uniform(key_rewards, shape=(config.total_sites,))
@@ -115,7 +118,9 @@ def _simulate_one_window_impl(
         global_time = global_time + dt
         patch_time = patch_time + dt  # Time spent in current patch
         evidence = evidence + drift_rate * dt
-        evidence = jnp.where(noise_std > 0, evidence + noise_std * noise * jnp.sqrt(dt), evidence)
+        evidence = jnp.where(
+            noise_std > 0, evidence + noise_std * noise * jnp.sqrt(dt), evidence
+        )  # not sure if this helps alot...
 
         # Check if we should leave
         should_leave = evidence >= config.threshold
@@ -197,36 +202,22 @@ class JaxPatchForagingDdm:
         depletion_rate: float = -0.1,
         threshold: float = 1.0,
         start_point: float = 0.0,
-        interval_min: float = 20.0,  # InterSite gap minimum (cm)
-        interval_scale: float = 19.0,  # InterSite gap exponential scale (cm)
-        interval_normalization: float = 88.58,  # For normalizing to ~1.0
+        inter_site_min: float = 20.0,  # InterSite gap minimum (cm)
+        inter_site_exp_alpha: float = 19.0,  # InterSite gap exponential scale (cm)
+        inter_site_max: float = 1e6,  # InterSite gap truncation upper bound (cm)
+        length_normalizing_factor: float = 88.58,  # Factor to normalize all lengths (cm) to dimensionless units
         odor_site_length: float = 50.0,  # Physical length of OdorSite (cm)
         max_sites_per_window: int = 500,
         n_feat: int = 37,
         burn_in_sites: int | None = None,
     ) -> None:
 
-        self.initial_prob = initial_prob
-        self.depletion_rate = depletion_rate
-        self.threshold = threshold
-        self.start_point = start_point
-
-        # Store interval parameters (raw, in cm)
-        self.interval_min_raw = interval_min
-        self.interval_scale_raw = interval_scale
-        self.interval_normalization = interval_normalization
-        self.odor_site_length_raw = odor_site_length
-
-        # Normalized interval parameters (for simulation)
-        self.interval_min = interval_min / interval_normalization
-        self.interval_scale = interval_scale / interval_normalization
-        self.odor_site_length = odor_site_length / interval_normalization
-
         # Burn-in: defaults to max_sites_per_window (matching original 2x behavior).
         # Reduce to speed up simulation at the cost of less burn-in for steady state.
         if burn_in_sites is None:
             burn_in_sites = max_sites_per_window
 
+        lnf = length_normalizing_factor
         self._config = _SimConfig(
             total_sites=max_sites_per_window + burn_in_sites,
             output_sites=max_sites_per_window,
@@ -234,14 +225,13 @@ class JaxPatchForagingDdm:
             depletion_rate=depletion_rate,
             threshold=threshold,
             start_point=start_point,
-            interval_min=self.interval_min,
-            interval_scale=self.interval_scale,
-            odor_site_length=self.odor_site_length,
+            inter_site_min=inter_site_min / lnf,
+            inter_site_exp_alpha=inter_site_exp_alpha / lnf,
+            inter_site_max=inter_site_max / lnf,
+            odor_site_length=odor_site_length / lnf,
             n_feat=n_feat,
         )
 
-        # Backward-compatible attributes
-        self.max_sites_per_window = self._config.total_sites
         self.n_feat = n_feat
 
     def simulate_one_window(self, theta: ArrayLike, rng_key: jax.Array) -> tuple[jax.Array, jax.Array]:
