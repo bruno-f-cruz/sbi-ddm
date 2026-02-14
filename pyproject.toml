@@ -7,7 +7,7 @@ name = "vr_foraging_sbi_ddm"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 dependencies = [
     "jax[cuda12]; sys_platform == 'linux'",
     "jax; sys_platform != 'linux'",
